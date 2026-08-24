@@ -9,9 +9,10 @@ pipeline {
     }
 
     environment {
-        APP_NAME = "register-app"
+        APP_NAME = "register-app-pipeline"
         RELEASE = "1.0.0"
         DOCKER_USER = "manimozhyan"
+
         IMAGE_NAME = "${DOCKER_USER}/${APP_NAME}"
         IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
     }
@@ -66,7 +67,26 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .'
+                sh '''
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                '''
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                sh '''
+                    docker run --rm \
+                    -v /var/run/docker.sock:/var/run/docker.sock \
+                    aquasec/trivy image \
+                    ${IMAGE_NAME}:${IMAGE_TAG} \
+                    --no-progress \
+                    --scanners vuln \
+                    --exit-code 1 \
+                    --severity HIGH,CRITICAL \
+                    --format table
+                '''
             }
         }
 
@@ -79,10 +99,19 @@ pipeline {
                     ) {
                         def dockerImage = docker.image("${IMAGE_NAME}:${IMAGE_TAG}")
 
-                        dockerImage.push()
+                        dockerImage.push("${IMAGE_TAG}")
                         dockerImage.push('latest')
                     }
                 }
+            }
+        }
+
+        stage('Cleanup Artifacts') {
+            steps {
+                sh '''
+                    docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                    docker rmi ${IMAGE_NAME}:latest || true
+                '''
             }
         }
     }
