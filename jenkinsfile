@@ -40,13 +40,25 @@ pipeline {
 
         stage('Build Application') {
             steps {
-                sh 'mvn clean package'
+                sh '''
+                    echo "========================================="
+                    echo "Building Java Application"
+                    echo "========================================="
+
+                    mvn clean package
+                '''
             }
         }
 
         stage('Test Application') {
             steps {
-                sh 'mvn test'
+                sh '''
+                    echo "========================================="
+                    echo "Running Tests"
+                    echo "========================================="
+
+                    mvn test
+                '''
             }
         }
 
@@ -73,7 +85,11 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    echo "Building image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "========================================="
+                    echo "Building Docker Image"
+                    echo "IMAGE_NAME = ${IMAGE_NAME}"
+                    echo "IMAGE_TAG  = ${IMAGE_TAG}"
+                    echo "========================================="
 
                     docker build \
                         -t ${IMAGE_NAME}:${IMAGE_TAG} \
@@ -82,6 +98,8 @@ pipeline {
                     docker tag \
                         ${IMAGE_NAME}:${IMAGE_TAG} \
                         ${IMAGE_NAME}:latest
+
+                    docker images | grep ${APP_NAME}
                 '''
             }
         }
@@ -89,6 +107,10 @@ pipeline {
         stage('Trivy Scan') {
             steps {
                 sh '''
+                    echo "========================================="
+                    echo "Running Trivy Security Scan"
+                    echo "========================================="
+
                     docker run --rm \
                         -v /var/run/docker.sock:/var/run/docker.sock \
                         aquasec/trivy image \
@@ -106,6 +128,10 @@ pipeline {
             steps {
                 script {
 
+                    echo "========================================="
+                    echo "Pushing Docker Image to Docker Hub"
+                    echo "========================================="
+
                     docker.withRegistry(
                         'https://index.docker.io/v1/',
                         'dockerhub'
@@ -121,11 +147,15 @@ pipeline {
             }
         }
 
-        stage('Cleanup Artifacts') {
+        stage('Cleanup Docker Artifacts') {
             steps {
                 sh '''
+                    echo "Cleaning Docker images..."
+
                     docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
                     docker rmi ${IMAGE_NAME}:latest || true
+
+                    docker image prune -f || true
                 '''
             }
         }
@@ -134,8 +164,10 @@ pipeline {
             steps {
                 script {
 
-                    echo "Triggering CD pipeline..."
+                    echo "========================================="
+                    echo "Triggering CD Pipeline"
                     echo "IMAGE_TAG = ${IMAGE_TAG}"
+                    echo "========================================="
 
                     sh """
                         curl -v -k \
@@ -153,22 +185,30 @@ pipeline {
 
     post {
 
-        failure {
-            emailext(
-                body: '''${SCRIPT, template="groovy-html.template"}''',
-                subject: "${env.JOB_NAME} - Build #${env.BUILD_NUMBER} - Failed",
-                mimeType: 'text/html',
-                to: 'manimozhyan.v@gmail.com'
-            )
+        success {
+            echo '''
+            =========================================
+            CI PIPELINE SUCCESS
+            =========================================
+
+            Application built successfully.
+            Docker image pushed successfully.
+            CD pipeline triggered successfully.
+
+            =========================================
+            '''
         }
 
-        success {
-            emailext(
-                body: '''${SCRIPT, template="groovy-html.template"}''',
-                subject: "${env.JOB_NAME} - Build #${env.BUILD_NUMBER} - Successful",
-                mimeType: 'text/html',
-                to: 'manimozhyan.v@gmail.com'
-            )
+        failure {
+            echo '''
+            =========================================
+            CI PIPELINE FAILED
+            =========================================
+
+            Check the failed stage above.
+
+            =========================================
+            '''
         }
     }
 }
